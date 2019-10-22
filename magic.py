@@ -87,15 +87,13 @@ try:
     for enrollment in enrollments:
         assigned = assign(enrollment)
 
-        if assigned == None:
-            continue
+        if assigned != None:
+            try:
+                counter[assigned] += 1
+            except KeyError:
+                counter[assigned] = 1
 
-        try:
-            counter[assigned] += 1
-        except KeyError:
-            counter[assigned] = 1
-
-        assignments.append((enrollment, assigned))
+        assignments.append((enrollment, assigned or "**GEEN**"))
 except KeyboardInterrupt:
     # still store the updated capacities
     save_capacities()
