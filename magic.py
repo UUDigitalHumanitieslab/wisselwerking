@@ -20,6 +20,7 @@ ENROLLMENT_PHONE = "telefoonnummer"
 ENROLLMENT_CHOICES = ["eerste_keuze", "tweede_keus", "derde_keus"]
 
 NONE_CHOICE = "Maak je keuze"
+NO_ASSIGNMENT = "**GEEN**"
 
 #
 # Start assigning!
@@ -42,7 +43,7 @@ def mail_template(assigned, enrollment):
     if assigned == first_choice:
         # first choice
         explain_choice = f"de Wisselwerking {assigned}. Het doet ons plezier je te laten weten dat je geplaatst bent voor deze Wisselwerking"
-    elif assigned == NONE_CHOICE:
+    elif assigned == NO_ASSIGNMENT:
         # nothing
         explain_choice = f"de Wisselwerking {assigned}. Helaas waren deze en eventuele verdere keuzes vol"
     else:
@@ -132,7 +133,7 @@ try:
             except KeyError:
                 counter[assigned] = 1
 
-        assignments.append((enrollment, assigned or "**GEEN**"))
+        assignments.append((enrollment, assigned or NO_ASSIGNMENT))
 except KeyboardInterrupt:
     # still store the updated capacities
     save_capacities()
