@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import csv
 import sys
+import re
 import os
+import glob
 
 filename = sys.argv[1]
 capacity_file = "capacities.csv"
@@ -15,9 +17,11 @@ CAPACITY_VALUE = "aantal"
 TEAM = "Desiree Capel, Nicoline Fokkema, Yvonne de Jong en Sheean Spoel"
 MAIL_COLUMN = "mail"
 
-ENROLLMENT_NAME = "naam"
-ENROLLMENT_PHONE = "telefoonnummer"
-ENROLLMENT_CHOICES = ["eerste_keuze", "tweede_keus", "derde_keus"]
+ENROLLMENT_FIRSTNAME = "voornaam"
+ENROLLMENT_LASTNAME = "achternaam"
+ENROLLMENT_MAIL = "e_mailadres"
+ENROLLMENT_DEPT = "afdeling"
+ENROLLMENT_CHOICES = ["eerste_keuze", "tweede_keuze", "derde_keuze"]
 
 NONE_CHOICE = "Maak je keuze"
 NO_ASSIGNMENT = "**GEEN**"
@@ -32,9 +36,19 @@ counter = {}
 
 assignments = []
 
-def format_name(enrollment):
-    name = enrollment[ENROLLMENT_NAME]
-    return name.strip().split(' ')[0].capitalize()
+def format_name(enrollment, include_lastname=False):
+    first_name = str.join(' ',
+        (part.capitalize() for part in enrollment[ENROLLMENT_FIRSTNAME].strip().split(' ')))
+    if include_lastname:
+        parts = []
+        for part in enrollment[ENROLLMENT_LASTNAME].strip().split(' '):
+            if part.lower() in ['van', 'von', 'de', 'der', 'den', 'die']:
+                parts.append(part.lower())
+            else:
+                parts.append(part.capitalize())
+        return first_name + ' ' + str.join(' ', parts)
+
+    return first_name
 
 def mail_template(assigned, enrollment):
     name = format_name(enrollment)
@@ -57,6 +71,8 @@ Beste {name},
 Je hebt je aangemeld voor {explain_choice}.
 
 We hebben je gegevens doorgegeven aan de contactpersoon van jouw Wisselwerking. Hij of zij neemt contact met je op om verdere afspraken te maken over je deelname.
+
+Heel veel plezier bij je wisselwerking!
 
 Hartelijke groet,
 
@@ -125,15 +141,14 @@ try:
     # assign everybody to their first choice which isn't filled yet
     # ordered by their enrolment date
     for enrollment in enrollments:
-        assigned = assign(enrollment)
+        assigned = assign(enrollment) or NO_ASSIGNMENT
 
-        if assigned != None:
-            try:
-                counter[assigned] += 1
-            except KeyError:
-                counter[assigned] = 1
+        try:
+            counter[assigned] += 1
+        except KeyError:
+            counter[assigned] = 1
 
-        assignments.append((enrollment, assigned or NO_ASSIGNMENT))
+        assignments.append((enrollment, assigned))
 except KeyboardInterrupt:
     # still store the updated capacities
     save_capacities()
@@ -145,8 +160,28 @@ print("""
 AANTAL AANMELDINGEN:
 """)
 
-for choice in sorted(counter):
-    print(f"{choice}\t{counter[choice]}")
+choices = sorted(set(capacities.keys()).union(counter.keys()))
+maxlength = sorted(len(choice) for choice in choices)[-1]
+sum = 0
+empty = []
+
+for choice in choices:
+    count = counter.get(choice, 0)
+    if count == 0:
+        empty.append(choice)
+    else:
+        print(f"{str(count).rjust(3)} {choice}")
+        sum += count
+
+print("=" * (maxlength + 4))
+print(f"{str(sum).rjust(3)} TOTAAL")
+
+if empty:
+    print("""
+WISSELWERKINGEN ZONDER TOEWIJZINGEN:
+""")
+    for choice in empty:
+        print(choice)
 
 # Store the assignments
 with open(output_file, mode="w", encoding="utf-8-sig") as csv_file:
@@ -160,3 +195,45 @@ with open(output_file, mode="w", encoding="utf-8-sig") as csv_file:
             "mail": mail_template(assigned, row),
             **row
         })
+
+# Store the assignments per choice - to mail the organizers
+output_prepath = str.join('.', output_file.split('.')[:-1])
+def output_text_file(choice, escape = True):    
+    return output_prepath + '.' + (choice if not escape else re.sub(r'[\*\(\) \-\.\&]+', '-', choice)) + '.txt'
+
+existing_files = glob.glob(output_text_file('*', False))
+
+for choice in sorted(counter):
+    target = output_text_file(choice)
+    try:
+        existing_files.remove(target)
+    except ValueError:
+        pass
+    with open(target, mode="w", encoding="utf-8-sig") as txt_file:
+        count = counter[choice]
+        choice_assignments = []
+        for (row, assigned) in assignments:
+            if assigned == choice:
+                choice_assignments.append(f"{format_name(row, True)} <{row[ENROLLMENT_MAIL]}> ({row[ENROLLMENT_DEPT].strip()})\n")
+
+        txt_file.writelines([f"""Beste organisator,
+
+Leuk dat je je hebt opgegeven om een wisselwerking te organiseren! Voor de wisselwerking {choice} hebben de volgende {count} person(en) zich aangemeld:
+
+"""] +
+choice_assignments +
+[f"""
+Zou je zo snel mogelijk contact willen opnemen met deze mensen om afspraken te maken over de wisselwerking? 
+
+Heel veel plezier bij de wisselwerking!
+
+Hartelijke groet,
+
+Team Wisselwerking Geesteswetenschappen
+{TEAM}
+"""])
+        # print(f"{choice}\t{counter[choice]}")
+
+# Clear existing files, which are no longer assigned
+for existing_file in existing_files:
+    os.remove(existing_file)
