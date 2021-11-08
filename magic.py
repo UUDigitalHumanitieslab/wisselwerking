@@ -232,7 +232,6 @@ Hartelijke groet,
 Team Wisselwerking Geesteswetenschappen
 {TEAM}
 """])
-        # print(f"{choice}\t{counter[choice]}")
 
 # Clear existing files, which are no longer assigned
 for existing_file in existing_files:
