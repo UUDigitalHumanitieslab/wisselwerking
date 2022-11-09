@@ -5,5 +5,7 @@
 3. Installeer Python 3 en draai vanuit een command line (powershell, bash, cmd):
 
 ```bash
-python magic.py Aanmeldformulier_Wisselwerking.csv
+python magic.py aanmeldformulier-wisselwerking.csv "/run/user/1000/gvfs/dav:host=webdav.uu.nl,ssl=true/Data/GW/Projecten/Wisselwerking OBP op reis/"
 ```
+
+(dat laatste is de locatie van de voorgaande toewijzingen op de O-schijf)

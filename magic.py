@@ -6,6 +6,7 @@ import os
 import glob
 
 filename = sys.argv[1]
+previous_years_dir = sys.argv[2]
 capacity_file = "capacities.csv"
 output_file = "toewijzingen.csv"
 
@@ -23,7 +24,8 @@ ENROLLMENT_MAIL = "e_mailadres"
 ENROLLMENT_DEPT = "afdeling"
 ENROLLMENT_CHOICES = ["eerste_keuze", "tweede_keuze", "derde_keuze"]
 
-NONE_CHOICE = "Maak je keuze"
+RANDOM_CHOICE = "» Verras me"
+NONE_CHOICE = ["Maak je keuze", "", "---"]
 NO_ASSIGNMENT = "**GEEN**"
 
 #
@@ -36,9 +38,10 @@ counter = {}
 
 assignments = []
 
+
 def format_name(enrollment, include_lastname=False):
     first_name = str.join(' ',
-        (part.capitalize() for part in enrollment[ENROLLMENT_FIRSTNAME].strip().split(' ')))
+                          (part.capitalize() for part in enrollment[ENROLLMENT_FIRSTNAME].strip().split(' ')))
     if include_lastname:
         parts = []
         for part in enrollment[ENROLLMENT_LASTNAME].strip().split(' '):
@@ -50,13 +53,18 @@ def format_name(enrollment, include_lastname=False):
 
     return first_name
 
+
 def mail_template(assigned, enrollment):
     name = format_name(enrollment)
     first_choice = enrollment[ENROLLMENT_CHOICES[0]].strip()
     second_choice = enrollment[ENROLLMENT_CHOICES[1]].strip()
+    third_choice = enrollment[ENROLLMENT_CHOICES[2]].strip()
     if assigned == first_choice:
         # first choice
         explain_choice = f"de Wisselwerking {assigned}. Het doet ons plezier je te laten weten dat je geplaatst bent voor deze Wisselwerking"
+    elif RANDOM_CHOICE in [first_choice, second_choice, third_choice]:
+        # so random
+        explain_choice = f"de Wisselwerking. Het doet ons plezier je te laten weten dat je geplaatst bent voor de Wisselwerking {assigned}"
     elif assigned == NO_ASSIGNMENT:
         # nothing
         explain_choice = f"de Wisselwerking {assigned}. Helaas waren deze en eventuele verdere keuzes vol"
@@ -64,7 +72,7 @@ def mail_template(assigned, enrollment):
         # second, third choice
         ordinal = "tweede" if assigned == second_choice else "derde"
         explain_choice = f"de Wisselwerking. Helaas was bij jouw eerste keuze {first_choice} geen plek meer. Je bent nu geplaatst bij je {ordinal} keuze: {assigned}"
-    
+
     return f"""
 Beste {name},
 
@@ -79,6 +87,72 @@ Hartelijke groet,
 Team Wisselwerking Geesteswetenschappen
 {TEAM}
 """.strip()
+
+
+def get_capacity(choice) -> int:
+    if choice == RANDOM_CHOICE:
+        return 999
+    try:
+        return capacities[choice]
+    except KeyError:
+        while True:
+            value = input(f"Capacity for {choice}? ")
+            try:
+                parsed = int(value)
+                capacities[choice] = parsed
+                return parsed
+            except ValueError:
+                print("NOPE")
+                pass
+
+
+def save_capacities():
+    with open(capacity_file, mode="w", encoding="utf-8-sig") as csv_file:
+        fieldnames = [CAPACITY_CHOICE, CAPACITY_VALUE]
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames, delimiter=';')
+
+        writer.writeheader()
+        for (choice, value) in capacities.items():
+            writer.writerow({
+                CAPACITY_CHOICE: choice,
+                CAPACITY_VALUE: value
+            })
+
+
+def read_history(base_path: str):
+    all_history = {}
+
+    for dir in os.listdir(base_path):
+        if dir.lower().startswith('wisselwerking'):
+            year_history = read_history_year(
+                dir, os.path.join(base_path, dir, "toewijzingen.csv"))
+
+            for email, assigned in year_history.items():
+                try:
+                    all_history[email] += assigned
+                except KeyError:
+                    all_history[email] = assigned
+
+    return all_history
+
+
+def read_history_year(dir: str, filepath: str):
+    if not os.path.isfile(filepath):
+        print(f"{dir} overgeslagen")
+        return {}
+
+    history = {}
+    with open(filepath, mode="r", encoding="utf-8-sig") as csv_file:
+        csv_reader = csv.DictReader(csv_file, delimiter=';')
+
+        for row in csv_reader:
+            email = row['e_mailadres'].lower()
+            if email not in history:
+                history[email] = []
+            history[email].append(row['toegewezen'])
+
+    return history
+
 
 if os.path.exists(capacity_file):
     with open(capacity_file, mode="r", encoding="utf-8-sig") as csv_file:
@@ -97,91 +171,128 @@ with open(filename, mode="r", encoding='iso8859-15') as csv_file:
         enrollments.insert(0, row)
         line_count += 1
 
+history = read_history(previous_years_dir)
 
-def get_capacity(choice):
-    try:
-        return capacities[choice]
-    except KeyError:
-        while True:
-            value = input(f"Capacity for {choice}? ")
-            try:
-                parsed = int(value)
-                capacities[choice] = parsed
-                return parsed
-            except ValueError:
-                print("NOPE")
-                pass
-
-
-def assign(enrollment):
+# Make sure all possible choices are known
+for enrollment in enrollments:
     for choice in map(lambda key: enrollment[key], ENROLLMENT_CHOICES):
         choice = choice.strip()
-        if choice == NONE_CHOICE:
+        if choice in NONE_CHOICE:
             continue
-        if not choice in counter or \
-                counter[choice] < get_capacity(choice):
-            return choice
-    return None
+        else:
+            counter[choice] = 0
 
 
-def save_capacities():
-    with open(capacity_file, mode="w", encoding="utf-8-sig") as csv_file:
-        fieldnames = [CAPACITY_CHOICE, CAPACITY_VALUE]
-        writer = csv.DictWriter(csv_file, fieldnames=fieldnames, delimiter=';')
+def assign_choice(enrollment, choice):
+    try:
+        counter[choice] += 1
+    except KeyError:
+        counter[choice] = 1
+    assignments.append((enrollment, choice))
+    unassigned.remove(enrollment)
 
-        writer.writeheader()
-        for (choice, value) in capacities.items():
-            writer.writerow({
-                CAPACITY_CHOICE: choice,
-                CAPACITY_VALUE: value
-            })
+    if choice in choices and counter[choice] >= get_capacity(choice):
+        choices.remove(choice)
 
+
+def show_counts(show_unassigned = True):
+    print("""
+    AANTAL AANMELDINGEN:
+    """)
+
+    choices = sorted(set(capacities.keys()).union(counter.keys()))
+    maxlength = sorted(len(choice) for choice in choices)[-1]
+    sum = 0
+    empty = []
+
+    for choice in choices:
+        count = counter.get(choice, 0)
+        if count == 0:
+            empty.append(choice)
+        else:
+            print(f"{str(count).rjust(3)} {choice}")
+            sum += count
+
+    print("=" * (maxlength + 4))
+    print(f"{str(sum).rjust(3)} TOTAAL")
+
+    if empty:
+        print("""
+    WISSELWERKINGEN ZONDER TOEWIJZINGEN:
+    """)
+        for choice in empty:
+            print(choice)
+
+    if show_unassigned and unassigned:
+        print(f"""
+    {len(unassigned)} WISSELWERKERS ZONDER TOEWIJZINGEN:
+    """)
+        for enrollment in unassigned:
+            print(enrollment[ENROLLMENT_MAIL])
+
+choices = list(sorted(set(capacities.keys()).union(counter.keys())))
+unassigned = list(enrollments)
+
+priority = []
+# Walk through the choices in iterations
+# Give priority on order of choice and within that on order of enrollment
+for key in ENROLLMENT_CHOICES:
+    for enrollment in enrollments:
+        choice = enrollment[key].strip()
+        if choice not in NONE_CHOICE:
+            priority.append((enrollment, choice))
 
 try:
-    # assign everybody to their first choice which isn't filled yet
-    # ordered by their enrolment date
-    for enrollment in enrollments:
-        assigned = assign(enrollment) or NO_ASSIGNMENT
-
-        try:
-            counter[assigned] += 1
-        except KeyError:
-            counter[assigned] = 1
-
-        assignments.append((enrollment, assigned))
+    while unassigned and choices:
+        done = True
+        for choice in list(choices):
+            for enrollment, enrollment_choice in priority:
+                if enrollment in unassigned and enrollment_choice == choice:
+                    assign_choice(enrollment, choice)
+                    done = False
+                    break
+        if done:
+            break
 except KeyboardInterrupt:
     # still store the updated capacities
     save_capacities()
     raise
 
+# assign the random members
+choices.remove(RANDOM_CHOICE)
+
+
+def reassign_random(assignments, history):
+    first = True
+    for enrollment in list(enrollment for (enrollment, choice) in assignments if choice == RANDOM_CHOICE):
+        unassigned.append(enrollment)
+        email = enrollment[ENROLLMENT_MAIL]
+        if first:
+            print("\n\n===TUSSENSTAND===\n\n")
+            show_counts(False)
+            first = False
+        print(f"\n\n{email} moet verrast worden")
+        if email in history:
+            print("Deed eerder de volgende wisselwerkingen: " +
+                  ", ".join(history[email]))
+        else:
+            print("Wisselwerking-newbie!")
+
+        while True:
+            choice = input("Wijs een andere wisselwerking toe: ")
+            if choice not in counter or counter[choice] < get_capacity(choice):
+                assign_choice(enrollment, choice)
+                counter[RANDOM_CHOICE] -= 1
+                break
+            else:
+                print("Zit al vol!")
+
+
+reassign_random(assignments, history)
+
 save_capacities()
 
-print("""
-AANTAL AANMELDINGEN:
-""")
-
-choices = sorted(set(capacities.keys()).union(counter.keys()))
-maxlength = sorted(len(choice) for choice in choices)[-1]
-sum = 0
-empty = []
-
-for choice in choices:
-    count = counter.get(choice, 0)
-    if count == 0:
-        empty.append(choice)
-    else:
-        print(f"{str(count).rjust(3)} {choice}")
-        sum += count
-
-print("=" * (maxlength + 4))
-print(f"{str(sum).rjust(3)} TOTAAL")
-
-if empty:
-    print("""
-WISSELWERKINGEN ZONDER TOEWIJZINGEN:
-""")
-    for choice in empty:
-        print(choice)
+show_counts()
 
 # Store the assignments
 with open(output_file, mode="w", encoding="utf-8-sig") as csv_file:
@@ -198,31 +309,36 @@ with open(output_file, mode="w", encoding="utf-8-sig") as csv_file:
 
 # Store the assignments per choice - to mail the organizers
 output_prepath = str.join('.', output_file.split('.')[:-1])
-def output_text_file(choice, escape = True):    
+
+
+def output_text_file(choice, escape=True):
     return output_prepath + '.' + (choice if not escape else re.sub(r'[\*\(\) \-\.\&]+', '-', choice)) + '.txt'
+
 
 existing_files = glob.glob(output_text_file('*', False))
 
 for choice in sorted(counter):
-    target = output_text_file(choice)
-    try:
-        existing_files.remove(target)
-    except ValueError:
-        pass
-    with open(target, mode="w", encoding="utf-8-sig") as txt_file:
-        count = counter[choice]
-        choice_assignments = []
-        for (row, assigned) in assignments:
-            if assigned == choice:
-                choice_assignments.append(f"{format_name(row, True)} <{row[ENROLLMENT_MAIL]}> ({row[ENROLLMENT_DEPT].strip()})\n")
+    count = counter[choice]
+    if count > 0:
+        target = output_text_file(choice)
+        try:
+            existing_files.remove(target)
+        except ValueError:
+            pass
+        with open(target, mode="w", encoding="utf-8-sig") as txt_file:
+            choice_assignments = []
+            for (row, assigned) in assignments:
+                if assigned == choice:
+                    choice_assignments.append(
+                        f"{format_name(row, True)} <{row[ENROLLMENT_MAIL]}> ({row[ENROLLMENT_DEPT].strip()})\n")
 
-        txt_file.writelines([f"""Beste organisator,
+            txt_file.writelines([f"""Beste organisator,
 
 Leuk dat je je hebt opgegeven om een wisselwerking te organiseren! Voor de wisselwerking {choice} hebben de volgende {count} person(en) zich aangemeld:
 
 """] +
-choice_assignments +
-[f"""
+                                choice_assignments +
+                                [f"""
 Zou je zo snel mogelijk contact willen opnemen met deze mensen om afspraken te maken over de wisselwerking? 
 
 Heel veel plezier bij de wisselwerking!
