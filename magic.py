@@ -59,28 +59,35 @@ def mail_template(assigned, enrollment):
     first_choice = enrollment[ENROLLMENT_CHOICES[0]].strip()
     second_choice = enrollment[ENROLLMENT_CHOICES[1]].strip()
     third_choice = enrollment[ENROLLMENT_CHOICES[2]].strip()
-    if assigned == first_choice:
+    if assigned == first_choice or first_choice == RANDOM_CHOICE:
         # first choice
-        explain_choice = f"de Wisselwerking {assigned}. Het doet ons plezier je te laten weten dat je geplaatst bent voor deze Wisselwerking"
-    elif RANDOM_CHOICE in [first_choice, second_choice, third_choice]:
-        # so random
-        explain_choice = f"de Wisselwerking. Het doet ons plezier je te laten weten dat je geplaatst bent voor de Wisselwerking {assigned}"
-    elif assigned == NO_ASSIGNMENT:
-        # nothing
-        explain_choice = f"de Wisselwerking {assigned}. Helaas waren deze en eventuele verdere keuzes vol"
-    else:
+        content = f"""Je bent geplaatst voor de Wisselwerking {assigned}. We hebben je gegevens doorgegeven aan de contactpersoon van deze Wisselwerking. Deze zal contact met opnemen om verdere afspraken te maken over je deelname.
+
+Heel veel plezier bij je wisselwerking!"""
+    elif assigned == second_choice or assigned == third_choice or \
+            RANDOM_CHOICE in [second_choice, third_choice]:
         # second, third choice
-        ordinal = "tweede" if assigned == second_choice else "derde"
-        explain_choice = f"de Wisselwerking. Helaas was bij jouw eerste keuze {first_choice} geen plek meer. Je bent nu geplaatst bij je {ordinal} keuze: {assigned}"
+        if assigned == third_choice:
+            ordinal = "derde"
+        elif assigned == second_choice:
+            ordinal = "tweede"
+        else:
+            # random!
+            ordinal = "vrije"
+
+        content = f"""Helaas was bij jouw eerste keuze voor de Wisselwerking bij {first_choice} geen plek meer. Je bent nu geplaatst bij je {ordinal} keuze: {assigned}.
+
+We hebben je gegevens doorgegeven aan de contactpersoon van deze Wisselwerking. Deze zal contact met opnemen om verdere afspraken te maken over je deelname.
+
+Heel veel plezier bij je wisselwerking!"""
+    else:
+        # nothing
+        content = f"Je hebt je aangemeld voor de Wisselwerking {first_choice}. Helaas waren deze en eventuele verdere keuzes vol."
 
     return f"""
 Beste {name},
 
-Je hebt je aangemeld voor {explain_choice}.
-
-We hebben je gegevens doorgegeven aan de contactpersoon van jouw Wisselwerking. Hij of zij neemt contact met je op om verdere afspraken te maken over je deelname.
-
-Heel veel plezier bij je wisselwerking!
+{content}
 
 Hartelijke groet,
 
@@ -93,7 +100,10 @@ def get_capacity(choice) -> int:
     if choice == RANDOM_CHOICE:
         return 999
     try:
-        return capacities[choice]
+        capacity = capacities[choice]
+        if capacity is None:
+            raise KeyError
+        return capacity
     except KeyError:
         while True:
             value = input(f"Capacity for {choice}? ")
@@ -117,6 +127,17 @@ def save_capacities():
                 CAPACITY_CHOICE: choice,
                 CAPACITY_VALUE: value
             })
+
+
+# rename old courses to new names (if known)
+renames = {}
+with open("renames.csv", mode="r", encoding="utf-8-sig") as csv_file:
+    csv_reader = csv.DictReader(csv_file, delimiter=';')
+
+    for row in csv_reader:
+        old = row['old'].lower()
+        new = row['new']
+        renames[old] = new
 
 
 def read_history(base_path: str):
@@ -149,7 +170,14 @@ def read_history_year(dir: str, filepath: str):
             email = row['e_mailadres'].lower()
             if email not in history:
                 history[email] = []
-            history[email].append(row['toegewezen'])
+
+            assigned = row['toegewezen']
+            try:
+                assigned = renames[assigned.lower()]
+            except KeyError:
+                pass
+
+            history[email].append(assigned)
 
     return history
 
@@ -159,7 +187,13 @@ if os.path.exists(capacity_file):
         csv_reader = csv.DictReader(csv_file, delimiter=';')
 
         for row in csv_reader:
-            capacities[row[CAPACITY_CHOICE]] = int(row[CAPACITY_VALUE])
+            try:
+                capacity = int(row[CAPACITY_VALUE])
+            except ValueError:
+                capacity = None
+            except TypeError:
+                capacity = None
+            capacities[row[CAPACITY_CHOICE]] = capacity
 
 with open(filename, mode="r", encoding='iso8859-15') as csv_file:
     csv_reader = csv.DictReader(csv_file, delimiter=';')
@@ -195,7 +229,20 @@ def assign_choice(enrollment, choice):
         choices.remove(choice)
 
 
-def show_counts(show_unassigned = True):
+def show_historic_counts():
+    historic_counts = {}
+    for items in history.values():
+        for item in items:
+            try:
+                historic_counts[item] += 1
+            except KeyError:
+                historic_counts[item] = 1
+
+    for item in sorted(historic_counts):
+        print(f"{str(historic_counts[item]).rjust(3)} {item}")
+
+
+def show_counts(show_unassigned=True):
     print("""
     AANTAL AANMELDINGEN:
     """)
@@ -229,6 +276,7 @@ def show_counts(show_unassigned = True):
     """)
         for enrollment in unassigned:
             print(enrollment[ENROLLMENT_MAIL])
+
 
 choices = list(sorted(set(capacities.keys()).union(counter.keys())))
 unassigned = list(enrollments)
@@ -269,6 +317,7 @@ def reassign_random(assignments, history):
         email = enrollment[ENROLLMENT_MAIL]
         if first:
             print("\n\n===TUSSENSTAND===\n\n")
+            show_historic_counts()
             show_counts(False)
             first = False
         print(f"\n\n{email} moet verrast worden")
@@ -281,6 +330,11 @@ def reassign_random(assignments, history):
         while True:
             choice = input("Wijs een andere wisselwerking toe: ")
             if choice not in counter or counter[choice] < get_capacity(choice):
+                for item in assignments:
+                    check_enrolment, _ = item
+                    if check_enrolment == enrollment:
+                        assignments.remove(item)
+                        break
                 assign_choice(enrollment, choice)
                 counter[RANDOM_CHOICE] -= 1
                 break
@@ -352,3 +406,5 @@ Team Wisselwerking Geesteswetenschappen
 # Clear existing files, which are no longer assigned
 for existing_file in existing_files:
     os.remove(existing_file)
+
+print("DONE! Plaats toewijzingen.csv op de O-schijf")
