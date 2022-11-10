@@ -138,6 +138,7 @@ with open("renames.csv", mode="r", encoding="utf-8-sig") as csv_file:
         old = row['old'].lower()
         new = row['new']
         renames[old] = new
+        renames[new.lower()] = new
 
 
 def read_history(base_path: str):
@@ -148,14 +149,20 @@ def read_history(base_path: str):
             year_history = read_history_year(
                 dir, os.path.join(base_path, dir, "toewijzingen.csv"))
 
-            for email, assigned in year_history.items():
+            for email, [dept, assigned] in year_history.items():
                 try:
-                    all_history[email] += assigned
+                    all_history[email][0].add(dept)
+                    all_history[email][1] += assigned
                 except KeyError:
-                    all_history[email] = assigned
+                    all_history[email] = [{dept}, assigned]
 
     return all_history
 
+def rename_dept(department):
+    try:
+        return renames[department.lower()]
+    except KeyError:
+        return department
 
 def read_history_year(dir: str, filepath: str):
     if not os.path.isfile(filepath):
@@ -167,17 +174,15 @@ def read_history_year(dir: str, filepath: str):
         csv_reader = csv.DictReader(csv_file, delimiter=';')
 
         for row in csv_reader:
-            email = row['e_mailadres'].lower()
+            email = row[ENROLLMENT_MAIL].lower()
+            dept = rename_dept(row[ENROLLMENT_DEPT])
+
             if email not in history:
-                history[email] = []
+                history[email] = [dept, []]
 
-            assigned = row['toegewezen']
-            try:
-                assigned = renames[assigned.lower()]
-            except KeyError:
-                pass
+            assigned = rename_dept(row['toegewezen'])
 
-            history[email].append(assigned)
+            history[email][1].append(assigned)
 
     return history
 
@@ -230,9 +235,12 @@ def assign_choice(enrollment, choice):
 
 
 def show_historic_counts():
+    print("""
+    TOEWIJZINGEN VAN VORIGE WISSELWERKINGEN:
+    """)
     historic_counts = {}
     for items in history.values():
-        for item in items:
+        for item in items[1]:
             try:
                 historic_counts[item] += 1
             except KeyError:
@@ -255,7 +263,8 @@ def show_counts(show_unassigned=True):
     for choice in choices:
         count = counter.get(choice, 0)
         if count == 0:
-            empty.append(choice)
+            if choice != RANDOM_CHOICE:
+                empty.append(choice)
         else:
             print(f"{str(count).rjust(3)} {choice}")
             sum += count
@@ -279,6 +288,10 @@ def show_counts(show_unassigned=True):
 
 
 choices = list(sorted(set(capacities.keys()).union(counter.keys())))
+for item, capacity in capacities.items():
+    # possible to close a department
+    if capacity == 0:
+        choices.remove(item)
 unassigned = list(enrollments)
 
 priority = []
@@ -320,16 +333,17 @@ def reassign_random(assignments, history):
             show_historic_counts()
             show_counts(False)
             first = False
-        print(f"\n\n{email} moet verrast worden")
+        depts = history[email][0]
+        print(f"\n\n{email} ({'; '.join(depts)}) moet verrast worden")
         if email in history:
             print("Deed eerder de volgende wisselwerkingen: " +
-                  ", ".join(history[email]))
+                  ", ".join(history[email][1]))
         else:
             print("Wisselwerking-newbie!")
 
         while True:
             choice = input("Wijs een andere wisselwerking toe: ")
-            if choice not in counter or counter[choice] < get_capacity(choice):
+            if (0 if choice not in counter else counter[choice]) < get_capacity(choice):
                 for item in assignments:
                     check_enrolment, _ = item
                     if check_enrolment == enrollment:
@@ -350,7 +364,7 @@ show_counts()
 
 # Store the assignments
 with open(output_file, mode="w", encoding="utf-8-sig") as csv_file:
-    fieldnames = [ASSIGNED_CHOICE, MAIL_COLUMN] + form_fieldnames
+    fieldnames = [ASSIGNED_CHOICE, ENROLLMENT_MAIL, MAIL_COLUMN] + [field for field in form_fieldnames if field != MAIL_COLUMN]
     writer = csv.DictWriter(csv_file, fieldnames=fieldnames, delimiter=';')
 
     writer.writeheader()
@@ -372,30 +386,45 @@ def output_text_file(choice, escape=True):
 existing_files = glob.glob(output_text_file('*', False))
 
 for choice in sorted(counter):
+    if choice == RANDOM_CHOICE:
+        continue
     count = counter[choice]
-    if count > 0:
-        target = output_text_file(choice)
-        try:
-            existing_files.remove(target)
-        except ValueError:
-            pass
-        with open(target, mode="w", encoding="utf-8-sig") as txt_file:
-            choice_assignments = []
-            for (row, assigned) in assignments:
-                if assigned == choice:
-                    choice_assignments.append(
-                        f"{format_name(row, True)} <{row[ENROLLMENT_MAIL]}> ({row[ENROLLMENT_DEPT].strip()})\n")
+    target = output_text_file(choice)
+    try:
+        existing_files.remove(target)
+    except ValueError:
+        pass
+    with open(target, mode="w", encoding="utf-8-sig") as txt_file:
+        choice_assignments = []
+        for (row, assigned) in assignments:
+            if assigned == choice:
+                choice_assignments.append(
+                    f"{format_name(row, True)} <{row[ENROLLMENT_MAIL]}> ({rename_dept(row[ENROLLMENT_DEPT].strip())})\n")
 
+
+        if count > 0:
             txt_file.writelines([f"""Beste organisator,
 
 Leuk dat je je hebt opgegeven om een wisselwerking te organiseren! Voor de wisselwerking {choice} hebben de volgende {count} person(en) zich aangemeld:
 
 """] +
-                                choice_assignments +
-                                [f"""
+                            choice_assignments +
+                            [f"""
 Zou je zo snel mogelijk contact willen opnemen met deze mensen om afspraken te maken over de wisselwerking? 
 
 Heel veel plezier bij de wisselwerking!
+
+Hartelijke groet,
+
+Team Wisselwerking Geesteswetenschappen
+{TEAM}
+"""])
+        else:
+            txt_file.writelines([f"""Beste organisator,
+
+Helaas heeft dit jaar niemand zich aangemeld voor de Wisselwerking {choice}.
+
+Dank dat je een Wisselwerking wilde organiseren. We hopen dat je volgend jaar weer meedoet!
 
 Hartelijke groet,
 
