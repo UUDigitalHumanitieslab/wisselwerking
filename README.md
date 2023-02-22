@@ -9,3 +9,14 @@ python magic.py aanmeldformulier-wisselwerking.csv "/run/user/1000/gvfs/dav:host
 ```
 
 (dat laatste is de locatie van de voorgaande toewijzingen op de O-schijf)
+
+
+## Statistieken
+
+Genereer csv-bestanden (geanonimiseerd!) met informatie over deelname in het verleden:
+
+```bash
+python history.py "/run/user/1000/gvfs/dav:host=webdav.uu.nl,ssl=true/Data/GW/Projecten/Wisselwerking OBP op reis/"
+```
+
+Hint: zorg dat het huidige jaar al op de juiste plek staat zodat die worden meegenomen.
