@@ -4,39 +4,39 @@ import sys
 import re
 import os
 import glob
+from typing import Dict, List, Tuple
+
+from wisselwerking.history import Enrollment, EnrollmentCollection, read_history, rename_dept
+from wisselwerking.settings import \
+    capacity_file, \
+    output_file, \
+    ASSIGNED_CHOICE, \
+    CAPACITY_CHOICE, \
+    CAPACITY_VALUE, \
+    TEAM, \
+    MAIL_COLUMN, \
+    ENROLLMENT_FIRSTNAME, \
+    ENROLLMENT_LASTNAME, \
+    ENROLLMENT_MAIL, \
+    ENROLLMENT_DEPT, \
+    ENROLLMENT_CHOICES, \
+    RANDOM_CHOICE, \
+    NONE_CHOICE, \
+    NO_ASSIGNMENT
 
 filename = sys.argv[1]
 previous_years_dir = sys.argv[2]
-capacity_file = "capacities.csv"
-output_file = "toewijzingen.csv"
 
-ASSIGNED_CHOICE = "toegewezen"
-
-CAPACITY_CHOICE = "keuze"
-CAPACITY_VALUE = "aantal"
-
-TEAM = "Desiree Capel, Nicoline Fokkema, Yvonne de Jong en Sheean Spoel"
-MAIL_COLUMN = "mail"
-
-ENROLLMENT_FIRSTNAME = "voornaam"
-ENROLLMENT_LASTNAME = "achternaam"
-ENROLLMENT_MAIL = "e_mailadres"
-ENROLLMENT_DEPT = "afdeling"
-ENROLLMENT_CHOICES = ["eerste_keuze", "tweede_keuze", "derde_keuze"]
-
-RANDOM_CHOICE = "» Verras me"
-NONE_CHOICE = ["Maak je keuze", "", "---"]
-NO_ASSIGNMENT = "**GEEN**"
 
 #
 # Start assigning!
 #
 
-enrollments = []
+enrollments: List[Dict[str, str]] = []
 capacities = {}
 counter = {}
 
-assignments = []
+assignments: List[Tuple[Dict[str, str], str]] = []
 
 
 def format_name(enrollment, include_lastname=False):
@@ -129,64 +129,6 @@ def save_capacities():
             })
 
 
-# rename old courses to new names (if known)
-renames = {}
-with open("renames.csv", mode="r", encoding="utf-8-sig") as csv_file:
-    csv_reader = csv.DictReader(csv_file, delimiter=';')
-
-    for row in csv_reader:
-        old = row['old'].lower()
-        new = row['new']
-        renames[old] = new
-        renames[new.lower()] = new
-
-
-def read_history(base_path: str):
-    all_history = {}
-
-    for dir in os.listdir(base_path):
-        if dir.lower().startswith('wisselwerking'):
-            year_history = read_history_year(
-                dir, os.path.join(base_path, dir, "toewijzingen.csv"))
-
-            for email, [dept, assigned] in year_history.items():
-                try:
-                    all_history[email][0].add(dept)
-                    all_history[email][1] += assigned
-                except KeyError:
-                    all_history[email] = [{dept}, assigned]
-
-    return all_history
-
-def rename_dept(department):
-    try:
-        return renames[department.lower()]
-    except KeyError:
-        return department
-
-def read_history_year(dir: str, filepath: str):
-    if not os.path.isfile(filepath):
-        print(f"{dir} overgeslagen")
-        return {}
-
-    history = {}
-    with open(filepath, mode="r", encoding="utf-8-sig") as csv_file:
-        csv_reader = csv.DictReader(csv_file, delimiter=';')
-
-        for row in csv_reader:
-            email = row[ENROLLMENT_MAIL].lower()
-            dept = rename_dept(row[ENROLLMENT_DEPT])
-
-            if email not in history:
-                history[email] = [dept, []]
-
-            assigned = rename_dept(row['toegewezen'])
-
-            history[email][1].append(assigned)
-
-    return history
-
-
 if os.path.exists(capacity_file):
     with open(capacity_file, mode="r", encoding="utf-8-sig") as csv_file:
         csv_reader = csv.DictReader(csv_file, delimiter=';')
@@ -215,14 +157,13 @@ history = read_history(previous_years_dir)
 # Make sure all possible choices are known
 for enrollment in enrollments:
     for choice in map(lambda key: enrollment[key], ENROLLMENT_CHOICES):
-        choice = choice.strip()
-        if choice in NONE_CHOICE:
+        if not choice or choice.strip() in NONE_CHOICE:
             continue
         else:
-            counter[choice] = 0
+            counter[choice.strip()] = 0
 
 
-def assign_choice(enrollment, choice):
+def assign_choice(enrollment: Dict[str, str], choice: str):
     try:
         counter[choice] += 1
     except KeyError:
@@ -239,12 +180,11 @@ def show_historic_counts():
     TOEWIJZINGEN VAN VORIGE WISSELWERKINGEN:
     """)
     historic_counts = {}
-    for items in history.values():
-        for item in items[1]:
-            try:
-                historic_counts[item] += 1
-            except KeyError:
-                historic_counts[item] = 1
+    for item in history.list_assigned():
+        try:
+            historic_counts[item] += 1
+        except KeyError:
+            historic_counts[item] = 1
 
     for item in sorted(historic_counts):
         print(f"{str(historic_counts[item]).rjust(3)} {item}")
@@ -299,9 +239,9 @@ priority = []
 # Give priority on order of choice and within that on order of enrollment
 for key in ENROLLMENT_CHOICES:
     for enrollment in enrollments:
-        choice = enrollment[key].strip()
-        if choice not in NONE_CHOICE:
-            priority.append((enrollment, choice))
+        choice = enrollment[key]
+        if choice and choice not in NONE_CHOICE:
+            priority.append((enrollment, choice.strip()))
 
 try:
     while unassigned and choices:
@@ -323,7 +263,7 @@ except KeyboardInterrupt:
 choices.remove(RANDOM_CHOICE)
 
 
-def reassign_random(assignments, history):
+def reassign_random(assignments: List[Tuple[Dict[str, str], str]], history: EnrollmentCollection):
     first = True
     for enrollment in list(enrollment for (enrollment, choice) in assignments if choice == RANDOM_CHOICE):
         unassigned.append(enrollment)
@@ -333,11 +273,12 @@ def reassign_random(assignments, history):
             show_historic_counts()
             show_counts(False)
             first = False
-        depts = history[email][0]
+        previous = list(history.by_email(email))
+        depts = set((rename_dept(row[ENROLLMENT_DEPT])) + map(lambda x: x.from_dept, previous))
         print(f"\n\n{email} ({'; '.join(depts)}) moet verrast worden")
-        if email in history:
+        if previous:
             print("Deed eerder de volgende wisselwerkingen: " +
-                  ", ".join(history[email][1]))
+                  ", ".join(x.assigned_dept for x in previous ))
         else:
             print("Wisselwerking-newbie!")
 
@@ -364,7 +305,8 @@ show_counts()
 
 # Store the assignments
 with open(output_file, mode="w", encoding="utf-8-sig") as csv_file:
-    fieldnames = [ASSIGNED_CHOICE, ENROLLMENT_MAIL, MAIL_COLUMN] + [field for field in form_fieldnames if field != MAIL_COLUMN]
+    fieldnames = [ASSIGNED_CHOICE, ENROLLMENT_MAIL, MAIL_COLUMN] + \
+        [field for field in form_fieldnames if field != MAIL_COLUMN]
     writer = csv.DictWriter(csv_file, fieldnames=fieldnames, delimiter=';')
 
     writer.writeheader()
@@ -379,7 +321,7 @@ with open(output_file, mode="w", encoding="utf-8-sig") as csv_file:
 output_prepath = str.join('.', output_file.split('.')[:-1])
 
 
-def output_text_file(choice, escape=True):
+def output_text_file(choice: str, escape=True):
     return output_prepath + '.' + (choice if not escape else re.sub(r'[\*\(\) \-\.\&]+', '-', choice)) + '.txt'
 
 
@@ -399,8 +341,7 @@ for choice in sorted(counter):
         for (row, assigned) in assignments:
             if assigned == choice:
                 choice_assignments.append(
-                    f"{format_name(row, True)} <{row[ENROLLMENT_MAIL]}> ({rename_dept(row[ENROLLMENT_DEPT].strip())})\n")
-
+                    f"{format_name(row, True)} <{row[ENROLLMENT_MAIL]}> ({rename_dept(row[ENROLLMENT_DEPT])})\n")
 
         if count > 0:
             txt_file.writelines([f"""Beste organisator,
@@ -408,8 +349,8 @@ for choice in sorted(counter):
 Leuk dat je je hebt opgegeven om een wisselwerking te organiseren! Voor de wisselwerking {choice} hebben de volgende {count} person(en) zich aangemeld:
 
 """] +
-                            choice_assignments +
-                            [f"""
+                                choice_assignments +
+                                [f"""
 Zou je zo snel mogelijk contact willen opnemen met deze mensen om afspraken te maken over de wisselwerking? 
 
 Heel veel plezier bij de wisselwerking!

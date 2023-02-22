@@ -2,3 +2,5 @@
 aanmeldformulier-wisselwerking.csv
 toewijzingen.csv
 toewijzingen.*.txt
+__pycache__
+history*.csv
