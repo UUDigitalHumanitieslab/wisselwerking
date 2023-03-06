@@ -4,3 +4,4 @@ toewijzingen.csv
 toewijzingen.*.txt
 __pycache__
 history*.csv
+*.pyc

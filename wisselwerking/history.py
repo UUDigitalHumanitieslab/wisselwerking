@@ -77,43 +77,43 @@ class EnrollmentCollection:
 
         # new participants each year
         per_year: Dict[str, List[int]] = {}
+        per_year_enrollment: Dict[str, List[Enrollment]] = {}
 
         for enrollment in self.items:
             years = f'{enrollment.years[0]}-{enrollment.years[1]}'
             participant_id = self.__get_id(enrollment.email)
             try:
                 per_year[years].append(participant_id)
+                per_year_enrollment[years].append(enrollment)
             except KeyError:
                 per_year[years] = [participant_id]
+                per_year_enrollment[years] = [enrollment]
 
+        all_previous_years = list(per_year.keys())[:-1]
         with open('history_new_participants.csv', 'w', encoding='utf-8-sig') as csv_file:
             writer = csv.DictWriter(csv_file, fieldnames=[
-                                    HISTORY_YEARS, 'old', 'new', 'completely_new'], delimiter=';')
+                                    HISTORY_YEARS] + all_previous_years + ['completely_new'], delimiter=';')
 
             writer.writeheader()
-            previous_year: List[int] = []
-            all_years: List[int] = []
+            previous_years: List[str] = []
             for years, participants in per_year.items():
-                old_count = 0
-                count = 0
                 new_count = 0
+                prev_years_counts = dict.fromkeys(all_previous_years, 0)
                 for p in participants:
-                    if p in all_years:
-                        old_count += 1
+                    for prev_years in previous_years:
+                        if p in per_year[prev_years]:
+                            prev_years_counts[prev_years] += 1
+                            break
                     else:
                         new_count += 1
-                    if p not in previous_year:
-                        count += 1
 
                 writer.writerow({
                     HISTORY_YEARS: years,
-                    'old': old_count,
-                    'new': count,
+                    **prev_years_counts,
                     'completely_new': new_count
                 })
 
-                previous_year = participants
-                all_years += participants
+                previous_years.insert(0, years)
 
         # how many times do people participate over the years?
         histogram: Dict[int, int] = {}
@@ -132,6 +132,25 @@ class EnrollmentCollection:
                 writer.writerow({
                     'times': times,
                     'count': count
+                })
+
+        # how many different departments participated?
+        with open('history_depts_histogram.csv', 'w', encoding='utf-8-sig') as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=[
+                                    HISTORY_YEARS, 'assigned_depts', 'from_depts'], delimiter=';')
+
+            writer.writeheader()
+            for years, enrollments in per_year_enrollment.items():
+                assigned_depts = set()
+                from_depts = set()
+                for e in enrollments:
+                    assigned_depts.add(e.assigned_dept)
+                    from_depts.add(e.from_dept)
+
+                writer.writerow({
+                    HISTORY_YEARS: years,
+                    'assigned_depts': len(assigned_depts),
+                    'from_depts': len(from_depts)
                 })
 
 
