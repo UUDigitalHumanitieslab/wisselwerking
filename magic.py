@@ -14,7 +14,7 @@ from wisselwerking.settings import \
     CAPACITY_CHOICE, \
     CAPACITY_VALUE, \
     TEAM, \
-    MAIL_COLUMN, \
+    ENROLLMENT_SOURCE, \
     ENROLLMENT_FIRSTNAME, \
     ENROLLMENT_LASTNAME, \
     ENROLLMENT_MAIL, \
@@ -142,15 +142,23 @@ if os.path.exists(capacity_file):
                 capacity = None
             capacities[row[CAPACITY_CHOICE]] = capacity
 
+unique_emails = set()
+
 with open(filename, mode="r", encoding='iso8859-15') as csv_file:
     csv_reader = csv.DictReader(csv_file, delimiter=';')
     form_fieldnames = csv_reader.fieldnames
     line_count = 0
 
     for row in csv_reader:
-        # The top row is the last entry
-        enrollments.insert(0, row)
-        line_count += 1
+        if row[ENROLLMENT_SOURCE] != "Test":
+            mail = row[ENROLLMENT_MAIL].lower().strip()
+            if mail in unique_emails:
+                print("DUBBELE DEELNEMER: " + mail)
+            else:
+                # The top row is the last entry
+                enrollments.insert(0, row)
+                line_count += 1
+                unique_emails.add(mail)
 
 history = read_history(previous_years_dir)
 
@@ -274,7 +282,7 @@ def reassign_random(assignments: List[Tuple[Dict[str, str], str]], history: Enro
             show_counts(False)
             first = False
         previous = list(history.by_email(email))
-        depts = set((rename_dept(row[ENROLLMENT_DEPT])) + map(lambda x: x.from_dept, previous))
+        depts = set([rename_dept(row[ENROLLMENT_DEPT])] + list(map(lambda x: x.from_dept, previous)))
         print(f"\n\n{email} ({'; '.join(depts)}) moet verrast worden")
         if previous:
             print("Deed eerder de volgende wisselwerkingen: " +
@@ -322,7 +330,7 @@ output_prepath = str.join('.', output_file.split('.')[:-1])
 
 
 def output_text_file(choice: str, escape=True):
-    return output_prepath + '.' + (choice if not escape else re.sub(r'[\*\(\) \-\.\&]+', '-', choice)) + '.txt'
+    return output_prepath + '.' + (choice if not escape else re.sub(r'[\*\(\) \-\.\&\/]+', '-', choice)) + '.txt'
 
 
 existing_files = glob.glob(output_text_file('*', False))

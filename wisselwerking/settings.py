@@ -9,6 +9,7 @@ CAPACITY_VALUE = "aantal"
 TEAM = "Desiree Capel, Nicoline Fokkema, Yvonne de Jong en Sheean Spoel"
 MAIL_COLUMN = "mail"
 
+ENROLLMENT_SOURCE = "_fd_Source"
 ENROLLMENT_FIRSTNAME = "voornaam"
 ENROLLMENT_LASTNAME = "achternaam"
 ENROLLMENT_MAIL = "e_mailadres"
@@ -19,5 +20,5 @@ HISTORY_YEARS = 'jaren'
 HISTORY_HOW_MANY = 'hoeveelste_keer'
 
 RANDOM_CHOICE = "» Verras me"
-NONE_CHOICE = ["Maak je keuze", "", "---"]
+NONE_CHOICE = ["Maak je keuze", "", "--", "---"]
 NO_ASSIGNMENT = "**GEEN**"
